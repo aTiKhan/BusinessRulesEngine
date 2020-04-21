@@ -18,6 +18,8 @@ namespace RulesEngine.RulesEngine
             new Dictionary<string, IList<Rule<TRoot>>>();
 
 
+        private readonly List<Rule<TRoot>> _rules = new List<Rule<TRoot>>();
+
         /// <summary>
         ///     If set triggers an exception which prevent a stack overflow if the specified level of recursion is over the
         ///     threshold
@@ -25,6 +27,9 @@ namespace RulesEngine.RulesEngine
         protected int RecursionLimit { get; set; }
 
         public IDictionary<string, IList<Rule<TRoot>>> RulesByTrigger => _rulesByTrigger;
+
+        public IList<Rule<TRoot>> Rules=> _rules;
+
 
         /// <summary>
         ///     First declaration of the fluent syntax. Sets the target property of the rule
@@ -35,11 +40,13 @@ namespace RulesEngine.RulesEngine
         protected FluentExtensions.FluentToken<TRoot, TTargetProperty> Set<TTargetProperty>(
             Expression<Func<TRoot, TTargetProperty>> propertySelector)
         {
+            
             return new FluentExtensions.FluentToken<TRoot, TTargetProperty>
             {
                 MappingRulesContainer = this,
                 TargetPropertySelector = propertySelector
             };
+
         }
 
         /// <summary>
@@ -59,13 +66,13 @@ namespace RulesEngine.RulesEngine
             if (hasChanged)
             {
                 modified.Add(propertyName);
-                Cascade(propertyName, root, parent, modified, 1);
+                Cascade(propertyName, root, modified, 1);
             }
 
             return modified;
         }
 
-        private void Cascade(string propertyName, object root, object parent, HashSet<string> modified,
+        private void Cascade(string propertyName, object root, HashSet<string> modified,
             int recursionLimit)
         {
             if (RecursionLimit > 0)
@@ -88,8 +95,37 @@ namespace RulesEngine.RulesEngine
                 }
             }
 
-            foreach (var name in modifiedInThisIteration) Cascade(name, root, parent, modified, recursionLimit + 1);
+            foreach (var name in modifiedInThisIteration) Cascade(name, root, modified, recursionLimit + 1);
         }
+
+
+        /// <summary>
+        /// Explicitly trigger all the rules. This may be useful if the object is not filled interactively
+        /// </summary>
+        /// <param name="root">The object on which the rules need to be triggered</param>
+        public ICollection<string> TriggerAll(object root)
+        {
+            var modifiedInThisIteration = new HashSet<string>();
+            foreach (var rule in Rules)
+            {
+                var targetName = rule.TargetPropertyName;
+
+                if (rule.Updater((TRoot)root))
+                {
+                    Trace(rule, "", (TRoot)root);
+                    
+                    modifiedInThisIteration.Add(targetName);
+                }
+            }
+
+            var allUpdates  = new HashSet<string>();
+
+            foreach (var name in modifiedInThisIteration) Cascade(name, root, allUpdates, 1);
+
+            return allUpdates;
+        }
+
+        public int RulesCount => Rules.Count;
 
         protected virtual void Trace(Rule<TRoot> triggeredRule, string triggerProperty, TRoot instance)
         {
